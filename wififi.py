@@ -58,7 +58,7 @@ def process_management(p):
         bss = p.wlan.bssid
         client_bssid = p.wlan.da
 
-        get_bap(bss) # Register if not exists
+        get_bap(bss).update_probe_response(p) # Register if not exists
 
     elif p.wlan.fc_type_subtype == '0': # Association request
         bss = p.wlan.bssid
@@ -75,7 +75,7 @@ def process_management(p):
         get_cap(client_bssid)
         
 
-    elif p.wlan.fc_type_subtype == '13': # Action. 11k?
+    elif p.wlan.fc_type_subtype == '13': # Action. 11k and 11v
         bss = p.wlan.bssid
         
 
@@ -144,6 +144,26 @@ stations = dict()
 ap_clients = dict()
 ###3
 
+#wlan.extcap.b19 == 0
+# wlan.tag.number == 127
+def check_available_v(packet):
+    verified = False
+    status = None
+    if 'wlan.mgt' in packet:
+        #wlan.extcap.b19 == 0
+        if 'wlan_extcap_b19' in packet['wlan.mgt'].field_names:
+            if packet['wlan.mgt'].wlan_extcap_b19 == '1':
+                status = True
+            else:
+                status = False
+        
+        # wlan.fixed.action_code == 23
+        if 'wlan_fixed_action_code' in packet['wlan.mgt'].field_names:
+            if packet['wlan.mgt'].wlan_fixed_action_code == '23' or packet['wlan.mgt'].wlan_fixed_action_code == '24':
+                verified = True
+            
+
+    return status, verified
 
 def check_available_w(packet):
     verified = False
@@ -204,11 +224,27 @@ class AP:
         self.ext_k = None
         self.ext_k_verified = False
 
+        self.ext_v = None
+        self.ext_v_verified = False
+
     def update_probe_request(self, packet):
-        pass
+        # 802.11v
+        self.logic_v(packet)
+
 
     def update_action(self, packet):
         self.logic_k(packet)
+        self.logic_v(packet)
+
+    def logic_v(self, packet):
+        v, vv = check_available_v(packet)
+
+        if v != None:
+            self.ext_v = v
+
+        if vv:
+            self.ext_v_verified = True
+            self.ext_v = True
 
     def logic_w(self, packet):
         w, wv = check_available_w(packet)
@@ -235,6 +271,9 @@ class AP:
     def update_probe_response(self, packet):
         # 802.11w
         self.logic_w(packet)
+
+        # 802.11v
+        self.logic_v(packet)
         
 
     def update_data(self, packet):
@@ -243,6 +282,7 @@ class AP:
     def update_association_request(self, packet):
         self.logic_w(packet)
         self.logic_k(packet)
+        self.logic_v(packet)
 
 
     def update_relationship(self, AP):
@@ -261,6 +301,9 @@ class AP:
 
         # 802.11k
         self.logic_k(packet)
+
+        # 802.11v
+        self.logic_v(packet)
         
 
     def get_bssid(self):
@@ -274,6 +317,10 @@ class AP:
 
     def get_k(self):
         return self.ext_k, self.ext_k_verified
+
+    def get_v(self):
+        # TODO: verify if client support it only when AP broadcast its support
+        return self.ext_v, self.ext_v_verified
 
     def __str__(self):
         return f"{self.bssid}\t{self.essid}"
@@ -311,7 +358,7 @@ for p in cap:
             
 
 
-print(f"  AP\tBSSID\t\t\t802.11w\t802.11k\tESSID")
+print(f"  AP\tBSSID\t\t\t802.11w\t802.11k\t802.11v\tESSID")
 print("-----------------------------------------")
 
 def print_w(ap):
@@ -348,11 +395,27 @@ def print_k(ap):
     return is_k
 
 
+def print_v(ap):
+    v_status, v_verified=ap.get_v()
+    
+    if v_status == None:
+        is_v='N/A'
+    elif not v_status:
+        is_v=Fore.RED + 'No' + Style.RESET_ALL
+    else:
+        is_v=Fore.GREEN + 'Yes' + Style.RESET_ALL
+        
+        if not v_verified:
+            is_v=is_v + Fore.BLUE + '*' + Style.RESET_ALL
+    
+    return is_v
+
 for index, k in enumerate(stations):
     ap = stations[k]
     
     is_w = print_w(ap)
     is_k = print_k(ap)
+    is_v = print_v(ap)
         
     
     # print(f"802.11k           : {is_k}")
@@ -362,7 +425,7 @@ for index, k in enumerate(stations):
     else:
         index_p="  "
 
-    print(f"{index_p}{index}\t{ap.get_bssid()}\t{is_w}\t{is_k}\t{ap.get_essid()}")
+    print(f"{index_p}{index}\t{ap.get_bssid()}\t{is_w}\t{is_k}\t{is_v}\t{ap.get_essid()}")
     
     subi=1
     for f in ap_clients:
@@ -370,7 +433,8 @@ for index, k in enumerate(stations):
         if cl.get_AP() == ap.get_bssid():
             is_w = print_w(cl)
             is_k = print_k(cl)
-            print(f"·-{index}_{subi}\t{f}\t{is_w}\t{is_k}")
+            is_v = print_v(cl)
+            print(f"·-{index}_{subi}\t{f}\t{is_w}\t{is_k}\t{is_v}")
             subi=subi+1
     # print("___________________________")
     print
