@@ -10,7 +10,9 @@ init()
 
 rfile="wifidump.pcap-01.cap"
 rfile="iphone5-80211k.pcap"
-
+rfile="802.11r-01.cap"
+rfile="802.11r-air-01.cap"
+rfile="iphone5-EAP-FT-over-air-ch40.pcap"
 
 if len(sys.argv) > 1:
     rfile=sys.argv[1]
@@ -73,19 +75,61 @@ def process_management(p):
 
         get_bap(bss) # Register if not exists
         get_cap(client_bssid)
+
+    elif p.wlan.fc_type_subtype == '2': # Reassociation req
+        bss = p.wlan.bssid
+        ap = get_bap(bss) # Register if not exists
+
+        if p.wlan.ta == bss:
+            cli = get_cap(p.wlan.ra)
+            sender = ap
+        else:
+            cli = get_cap(p.wlan.ta)
+            sender = cli
+
+        sender.update_reassociation_request(p)
+
+    elif p.wlan.fc_type_subtype == '3': # Reassociation response
+        bss = p.wlan.bssid
+        ap = get_bap(bss) # Register if not exists
+
+        if p.wlan.ta == bss:
+            cli = get_cap(p.wlan.ra)
+            sender = ap
+        else:
+            cli = get_cap(p.wlan.ta)
+            sender = cli
+
+        sender.update_reassociation_response(p)
+
+    elif p.wlan.fc_type_subtype == '11': # Authentication
+        bss = p.wlan.bssid
+        ap = get_bap(bss) # Register if not exists
+
+        if p.wlan.ta == bss:
+            cli = get_cap(p.wlan.ra)
+            sender = ap
+        else:
+            cli = get_cap(p.wlan.ta)
+            sender = cli
+
+        sender.update_authentication(p)
         
 
-    elif p.wlan.fc_type_subtype == '13': # Action. 11k and 11v
+    elif p.wlan.fc_type_subtype == '13': # Action.
         bss = p.wlan.bssid
+        ap = get_bap(bss) # Register if not exists
         
 
         if p.wlan.ta == bss:
-            client_bssid = p.wlan.ra
-            get_bap(bss).update_action(p)
+            cli = get_cap(p.wlan.ra)
+            sender = ap
         else:
-            client_bssid = p.wlan.ta
-            get_cap(client_bssid).update_relationship(bss)
-            get_cap(client_bssid).update_action(p)
+            cli = get_cap(p.wlan.ta)
+            sender = cli
+
+        cli.update_relationship(bss)
+        sender.update_action(p)
 
 
 
@@ -144,8 +188,24 @@ stations = dict()
 ap_clients = dict()
 ###3
 
-#wlan.extcap.b19 == 0
-# wlan.tag.number == 127
+def check_available_r(packet):
+    verified = False
+    status = None
+    if 'wlan.mgt' in packet:
+        if 'wlan_mobility_domain_ft_capab_ft_over_ds' in packet['wlan.mgt'].field_names:
+            if '1' in packet['wlan.mgt'].wlan_mobility_domain_ft_capab_ft_over_ds:
+                status = "DS"
+            else:
+                status = "Air"
+        else:
+            status = False
+
+        if 'wlan_ft_snonce' in  packet['wlan.mgt'].field_names:
+            verified = True
+    
+    return status, verified
+
+
 def check_available_v(packet):
     verified = False
     status = None
@@ -227,14 +287,29 @@ class AP:
         self.ext_v = None
         self.ext_v_verified = False
 
+        self.ext_r = None
+        self.ext_r_verified = False
+
     def update_probe_request(self, packet):
         # 802.11v
         self.logic_v(packet)
 
+    def update_authentication(self, packet):
+        # 802.11r
+        self.logic_r(packet)
+
+    def update_reassociation_request(self, packet):
+        # 802.11r
+        self.logic_r(packet)
+
+    def update_reassociation_response(self, packet):
+        # 802.11r
+        self.logic_r(packet)
 
     def update_action(self, packet):
         self.logic_k(packet)
         self.logic_v(packet)
+        self.logic_r(packet)
 
     def logic_v(self, packet):
         v, vv = check_available_v(packet)
@@ -256,6 +331,16 @@ class AP:
             self.ext_w_verified = True
             self.ext_w = True
 
+    def logic_r(self, packet):
+        r, rv = check_available_r(packet)
+
+        if r != None:
+            self.ext_r = r
+
+        if rv:
+            self.ext_r_verified = True
+            self.ext_r = True
+
 
     def logic_k(self, packet):
         k, kv = check_available_k(packet)
@@ -274,6 +359,10 @@ class AP:
 
         # 802.11v
         self.logic_v(packet)
+
+        self.logic_r(packet)
+
+        self.essid = packet['wlan.mgt'].wlan_ssid
         
 
     def update_data(self, packet):
@@ -286,7 +375,7 @@ class AP:
 
 
     def update_relationship(self, AP):
-        self.ap_connected = AP
+        self.ap_connected = AP # string of BSSID
 
     def get_AP(self):
         return self.ap_connected
@@ -304,6 +393,9 @@ class AP:
 
         # 802.11v
         self.logic_v(packet)
+
+        # 802.11r
+        self.logic_r(packet)
         
 
     def get_bssid(self):
@@ -314,6 +406,9 @@ class AP:
 
     def get_w(self):
         return self.ext_w, self.ext_w_verified
+
+    def get_r(self):
+        return self.ext_r, self.ext_r_verified
 
     def get_k(self):
         return self.ext_k, self.ext_k_verified
@@ -358,14 +453,16 @@ for p in cap:
             
 
 
-print(f"  AP\tBSSID\t\t\t802.11w\t802.11k\t802.11v\tESSID")
-print("-----------------------------------------")
+print(f"  AP\tBSSID\t\t\t11w\t11k\t11v\t11r\tESSID")
+print("-------------------------------------------------------------------------------")
+
+print_unknown='?'
 
 def print_w(ap):
     w_status, w_verified=ap.get_w()
 
     if w_status == None:
-        is_w="N/A"
+        is_w=print_unknown
     elif not w_status:
         is_w=Fore.RED + 'No' + Style.RESET_ALL
     else:
@@ -379,11 +476,26 @@ def print_w(ap):
 
     return is_w
 
+def print_r(ap):
+    r_status, r_verified=ap.get_r()
+
+    if r_status == None:
+        is_r=print_unknown
+    elif not r_status:
+        is_r=Fore.RED + 'No' + Style.RESET_ALL
+    else:
+        is_r=Fore.GREEN + r_status + Style.RESET_ALL
+
+        if not r_verified:
+            is_r=is_r + Fore.BLUE + '*' + Style.RESET_ALL
+
+    return is_r
+
 def print_k(ap):
     k_status, k_verified=ap.get_k()
     
     if k_status == None:
-        is_k='N/A'
+        is_k=print_unknown
     elif not k_status:
         is_k=Fore.RED + 'No' + Style.RESET_ALL
     else:
@@ -399,7 +511,7 @@ def print_v(ap):
     v_status, v_verified=ap.get_v()
     
     if v_status == None:
-        is_v='N/A'
+        is_v=print_unknown
     elif not v_status:
         is_v=Fore.RED + 'No' + Style.RESET_ALL
     else:
@@ -416,6 +528,7 @@ for index, k in enumerate(stations):
     is_w = print_w(ap)
     is_k = print_k(ap)
     is_v = print_v(ap)
+    is_r = print_r(ap)
         
     
     # print(f"802.11k           : {is_k}")
@@ -425,7 +538,7 @@ for index, k in enumerate(stations):
     else:
         index_p="  "
 
-    print(f"{index_p}{index}\t{ap.get_bssid()}\t{is_w}\t{is_k}\t{is_v}\t{ap.get_essid()}")
+    print(f"{index_p}{index}\t{ap.get_bssid()}\t{is_w}\t{is_k}\t{is_v}\t{is_r}\t{ap.get_essid()}")
     
     subi=1
     for f in ap_clients:
@@ -434,7 +547,7 @@ for index, k in enumerate(stations):
             is_w = print_w(cl)
             is_k = print_k(cl)
             is_v = print_v(cl)
-            print(f"·-{index}_{subi}\t{f}\t{is_w}\t{is_k}\t{is_v}")
+            print(f"·-{index}_{subi}\t{f}\t{is_w}\t{is_k}\t{is_v}\t{is_r}")
             subi=subi+1
     # print("___________________________")
     print
