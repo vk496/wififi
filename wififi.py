@@ -13,6 +13,7 @@ rfile="iphone5-80211k.pcap"
 rfile="802.11r-01.cap"
 rfile="802.11r-air-01.cap"
 rfile="iphone5-EAP-FT-over-air-ch40.pcap"
+rfile="mesh.pcap"
 
 if len(sys.argv) > 1:
     rfile=sys.argv[1]
@@ -27,7 +28,18 @@ if len(sys.argv) > 1:
 #     25, # Block ACK
 # )
 
+
+def valid_bssid(x):
+    return {
+        'ff:ff:ff:ff:ff:ff': False,
+        '00:00:00:00:00:00': False,
+    }.get(x, True)
+
 def get_bap(bss):
+
+    if not valid_bssid(bss):
+        return
+
     try:
         myAp = stations[bss]
     except KeyError:
@@ -49,7 +61,7 @@ def get_cap(client_bssid):
 def process_management(p):
     # process_client(p)
     if p.wlan.fc_type_subtype == '8': # Beacon frames
-        bss = p.wlan.bssid
+        bss = p.wlan.bssid # bssid sometimes can report all "0" or "f"
         get_bap(bss).update_beacon(p)
     
     elif p.wlan.fc_type_subtype == '4': # Probe request    
@@ -163,10 +175,21 @@ def process_control(packet):
         if 'ta' in packet.wlan.field_names and bssid_cli == packet.wlan.ta:
             cli.logic_w(packet)
 
-def process_data(packet):
+def process_data(p):
     if p.wlan.fc_type_subtype == '40': # QoS Data
-        bss = p.wlan.bssid
-        client_bssid = p.wlan.staa
+
+        if 'bssid' in p.wlan.field_names:
+            bss = p.wlan.bssid
+            client_bssid = p.wlan.staa
+        else:
+            if p.wlan.ta in stations:
+                bss = p.wlan.ta
+                client_bssid = p.wlan.ra
+            elif p.wlan.ta in ap_clients:
+                bss = p.wlan.ra
+                client_bssid = p.wlan.ta
+            else:
+                return
 
         get_bap(bss) # Register if not exists
         get_cap(client_bssid) # Register if not exists
@@ -176,7 +199,7 @@ def process_data(packet):
         else:
             sender = get_cap(client_bssid)
 
-        sender.update_data(packet)
+        sender.update_data(p)
 
         
 
@@ -434,14 +457,21 @@ cap = pyshark.FileCapture(rfile)
 
 for p in cap:
     if 'WLAN' in p: # Only WLAN packets
-        if p.wlan.fc_type == '0': # Managment
-            process_management(p)
-        elif p.wlan.fc_type == '1': # Control
-            process_control(p)
-        elif p.wlan.fc_type == '2': # Data
-            process_data(p)
-        elif p.wlan.fc_type == '3': # Extension
-            pass
+        try:
+            if p.wlan.fc_type == '0': # Managment
+                process_management(p)
+            elif p.wlan.fc_type == '1': # Control
+                process_control(p)
+            elif p.wlan.fc_type == '2': # Data
+                process_data(p)
+            elif p.wlan.fc_type == '3': # Extension
+                pass
+        except Exception as e:
+            if 'MALFORMED' in p.highest_layer:
+                continue
+            else:
+                raise e
+
     
         # try:
         #     for i, ap in stations.items():
