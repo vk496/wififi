@@ -13,7 +13,7 @@ rfile="iphone5-80211k.pcap"
 rfile="802.11r-01.cap"
 rfile="802.11r-air-01.cap"
 rfile="iphone5-EAP-FT-over-air-ch40.pcap"
-rfile="mesh.pcap"
+rfile="cap-01.cap"
 # rfile="bad_mesh.pcap"
 
 if len(sys.argv) > 1:
@@ -319,6 +319,19 @@ def check_available_k(packet):
 
     return status, verified
 
+def check_mimo(packet):
+    status = None
+    if 'wlan_vht_capabilities' in packet['wlan.mgt'].field_names:
+        if packet['wlan.mgt'].wlan_vht_capabilities_subeamformee == '1' or packet['wlan.mgt'].wlan_vht_capabilities_subeamformer == '1':
+            status = "MU+"
+        else:
+            status = "MU"
+    elif 'wlan_ht_capabilities' in packet['wlan.mgt'].field_names:
+        status = "S"
+
+    return status
+
+
 class AP:
     def __init__(self, packet, client=False):
         self._packet = packet
@@ -345,6 +358,8 @@ class AP:
         self.ext_r_verified = False
 
         self.ext_s = None
+
+        self.ext_mimo = None
 
     def update_probe_request(self, packet):
         # 802.11v
@@ -441,6 +456,7 @@ class AP:
             self.essid = packet['wlan.mgt'].wlan_ssid
 
     def update_association_request(self, packet):
+        self.ext_mimo = check_mimo(packet)
         self.logic_w(packet)
         self.logic_k(packet)
         self.logic_v(packet)
@@ -454,6 +470,8 @@ class AP:
 
     def update_beacon(self, packet):
         self._packet = packet
+
+        self.ext_mimo = check_mimo(packet)
 
         # 802.11w
         self.logic_w(packet)
@@ -494,6 +512,9 @@ class AP:
     def get_v(self):
         # TODO: verify if client support it only when AP broadcast its support
         return self.ext_v, self.ext_v_verified
+
+    def get_mimo(self):
+        return self.ext_mimo
 
     def __str__(self):
         return f"{self.bssid}\t{self.essid}"
@@ -538,10 +559,26 @@ for p in cap:
             
 
 
-print(f"  AP\tBSSID\t\t\t11w\t11k\t11v\t11r\t11s\tESSID")
+print(f"  AP\tBSSID\t\t\t11w\t11k\t11v\t11r\t11s\tMIMO\tESSID")
 print("-------------------------------------------------------------------------------")
 
 print_unknown='?'
+
+
+def print_mimo(ap):
+    m_status=ap.get_mimo()
+
+    if m_status == None:
+        is_m=print_unknown
+    else:
+        if m_status == 'S':
+            is_m=Fore.RED + m_status + Style.RESET_ALL
+        elif m_status == 'MU':
+            is_m=Fore.YELLOW + m_status + Style.RESET_ALL
+        elif m_status == 'MU+':
+            is_m=Fore.GREEN + m_status + Style.RESET_ALL
+
+    return is_m
 
 def print_w(ap):
     w_status, w_verified=ap.get_w()
@@ -627,6 +664,7 @@ for index, k in enumerate(stations):
     is_v = print_v(ap)
     is_r = print_r(ap)
     is_s = print_s(ap)
+    is_m = print_mimo(ap)
         
     
     # print(f"802.11k           : {is_k}")
@@ -636,7 +674,7 @@ for index, k in enumerate(stations):
     else:
         index_p="  "
 
-    print(f"{index_p}{index}\t{ap.get_bssid()}\t{is_w}\t{is_k}\t{is_v}\t{is_r}\t{is_s}\t{ap.get_essid()}")
+    print(f"{index_p}{index}\t{ap.get_bssid()}\t{is_w}\t{is_k}\t{is_v}\t{is_r}\t{is_s}\t{is_m}\t{ap.get_essid()}")
     
     subi=1
     for f in ap_clients:
@@ -646,7 +684,8 @@ for index, k in enumerate(stations):
             is_k = print_k(cl)
             is_v = print_v(cl)
             is_s = print_s(cl)
-            print(f"·-{index}_{subi}\t{f}\t{is_w}\t{is_k}\t{is_v}\t{is_r}\t{is_s}")
+            is_m = print_mimo(ap)
+            print(f"·-{index}_{subi}\t{f}\t{is_w}\t{is_k}\t{is_v}\t{is_r}\t{is_s}\t{is_m}")
             subi=subi+1
     # print("___________________________")
     print
