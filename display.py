@@ -1,6 +1,3 @@
-from colorama import init, Fore, Back, Style
-
-
 
 print_unknown='?'
 
@@ -12,11 +9,11 @@ def print_mimo(ap):
         is_m=print_unknown
     else:
         if m_status == 'S':
-            is_m=Fore.RED + m_status + Style.RESET_ALL
+            is_m=m_status
         elif m_status == 'MU':
-            is_m=Fore.YELLOW + m_status + Style.RESET_ALL
+            is_m=m_status
         elif m_status == 'MU+':
-            is_m=Fore.GREEN + m_status + Style.RESET_ALL
+            is_m=m_status
 
     return is_m
 
@@ -26,15 +23,15 @@ def print_w(ap):
     if w_status == None:
         is_w=print_unknown
     elif not w_status:
-        is_w=Fore.RED + 'No' + Style.RESET_ALL
+        is_w='No'
     else:
         if w_status == 'Optional':
-            is_w=Fore.YELLOW + 'Opt' + Style.RESET_ALL
+            is_w='Opt'
         else:
-            is_w=Fore.GREEN + 'Req' + Style.RESET_ALL
+            is_w='Req'
 
         if not w_verified:
-            is_w=is_w + Fore.BLUE + '*' + Style.RESET_ALL
+            is_w=is_w + '*'
 
     return is_w
 
@@ -44,12 +41,12 @@ def print_r(ap):
     if r_status == None:
         is_r=print_unknown
     elif not r_status:
-        is_r=Fore.RED + 'No' + Style.RESET_ALL
+        is_r='No'
     else:
-        is_r=Fore.GREEN + r_status + Style.RESET_ALL
+        is_r=r_status
 
         if not r_verified:
-            is_r=is_r + Fore.BLUE + '*' + Style.RESET_ALL
+            is_r=is_r + '*'
 
     return is_r
 
@@ -59,9 +56,9 @@ def print_s(ap):
     if s_status == None:
         is_s=print_unknown
     elif not s_status:
-        is_s=Fore.RED + 'No' + Style.RESET_ALL
+        is_s='No'
     else:
-        is_s=Fore.GREEN + 'Yes' + Style.RESET_ALL
+        is_s='Yes'
 
     return is_s
 
@@ -71,12 +68,12 @@ def print_k(ap):
     if k_status == None:
         is_k=print_unknown
     elif not k_status:
-        is_k=Fore.RED + 'No' + Style.RESET_ALL
+        is_k='No'
     else:
-        is_k=Fore.GREEN + 'Yes' + Style.RESET_ALL
+        is_k='Yes'
         
         if not k_verified:
-            is_k=is_k + Fore.BLUE + '*' + Style.RESET_ALL
+            is_k=is_k + '*'
     
     return is_k
 
@@ -87,11 +84,11 @@ def print_v(ap):
     if v_status == None:
         is_v=print_unknown
     elif not v_status:
-        is_v=Fore.RED + 'No' + Style.RESET_ALL
+        is_v='No'
     else:
-        is_v=Fore.GREEN + 'Yes' + Style.RESET_ALL
+        is_v='Yes'
         
         if not v_verified:
-            is_v=is_v + Fore.BLUE + '*' + Style.RESET_ALL
+            is_v=is_v + '*'
     
     return is_v
