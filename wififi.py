@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 import pyshark
 import argparse
 import argparse
@@ -9,9 +10,18 @@ from display import *
 
 parser = argparse.ArgumentParser()
 group = parser.add_mutually_exclusive_group(required=True)
-group.add_argument('-f', '--file', action='store')
-group.add_argument('-i', '--interface', action='store')
+group.add_argument('-f', '--file', action='store', metavar='')
+group.add_argument('-i', '--interface', action='store', metavar='', choices=os.listdir('/sys/class/net/'))
 args = parser.parse_args()
+
+
+if args.interface:
+    with open(f'/sys/class/net/{args.interface}/flags','r') as f:
+        value = int(f.read(), 16)
+        if value & 0x100 == 0:
+            raise ValueError(f"{args.interface} is NOT in monitor/promiscuous mode")
+
+
 
 
 def display_all(count_p, curses=None):
@@ -71,6 +81,7 @@ import curses
 
 if args.file:
     cap = pyshark.FileCapture(args.file)
+    screen = None
 else:
     screen = curses.initscr()
     capture = pyshark.LiveCapture(interface=args.interface)
@@ -98,17 +109,9 @@ for p in cap:
             else:
                 raise e
 
-        packet_count+=1
-        if args.interface and packet_count % 10 == 0:
-            display_all(packet_count, curses=screen)
-
-
-    
-        # try:
-        #     for i, ap in stations.items():
-        #         print(ap.get_k())
-        # except Exception:
-        #     pass
+    packet_count+=1
+    if args.interface and packet_count % 10 == 0:
+        display_all(packet_count, curses=screen)
 
 if args.file:
     display_all(packet_count)
