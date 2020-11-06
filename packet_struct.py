@@ -21,12 +21,9 @@ def get_bap(bss, p):
         return
 
     try:
-        myAp = stations[bss]
+        return AP.stations[bss]
     except KeyError:
-        myAp = AP(p)
-        stations[bss] = myAp
-    
-    return myAp
+        return AP(p)
 
 
 def get_cap(client_bssid, p):
@@ -35,15 +32,12 @@ def get_cap(client_bssid, p):
         return
 
     try:
-        c = ap_clients[client_bssid]
+        return AP.client_stations[client_bssid]
     except KeyError:
         if not check_available_s(p):
-            c = AP(p, client=client_bssid)
-            ap_clients[client_bssid] = c
-        else:
-            c = None
-    
-    return c
+            return AP(p, client=client_bssid)
+
+    return None
 
 def process_management(p):
     # process_client(p)
@@ -137,7 +131,7 @@ def process_management(p):
     else: # For the case...
         if 'bssid' in p.wlan.field_names:
             bss = p.wlan.bssid
-            get_bap(bss, p).logic_w(p) # Register if not exists and check 802.11w
+            get_bap(bss, p)._logic_w(p) # Register if not exists and check 802.11w
 
 
 
@@ -149,20 +143,32 @@ def process_control(packet):
     # Verify if possible. Don't register new elements
 
     # If someone is already registered as AP, verify w
-    for bssid_ap, ap in stations.items():
-        if 'ra' in packet.wlan.field_names and bssid_ap == packet.wlan.ra:
-            ap.logic_w(packet)
+    bssid = None
+    if 'ra' in packet.wlan.field_names:
+        bssid = packet.wlan.ra
+    elif 'ta' in packet.wlan.field_names:
+        bssid = packet.wlan.ta
 
-        if 'ta' in packet.wlan.field_names and bssid_ap == packet.wlan.ta:
-            ap.logic_w(packet)
+    if bssid in AP.stations:
+        AP.stations[bssid]._logic_w(packet)
+
+    if bssid in AP.client_stations:
+        AP.client_stations[bssid]._logic_w(packet)
+
+    # for bssid_ap, ap in AP.stations.items():
+    #     if 'ra' in packet.wlan.field_names and bssid_ap == packet.wlan.ra:
+    #         ap.logic_w(packet)
+
+    #     if 'ta' in packet.wlan.field_names and bssid_ap == packet.wlan.ta:
+    #         ap.logic_w(packet)
         
-    # The same for clients
-    for bssid_cli, cli in ap_clients.items():
-        if 'ra' in packet.wlan.field_names and bssid_cli == packet.wlan.ra:
-            cli.logic_w(packet)
+    # # The same for clients
+    # for bssid_cli, cli in AP.client_stations.items():
+    #     if 'ra' in packet.wlan.field_names and bssid_cli == packet.wlan.ra:
+    #         cli.logic_w(packet)
 
-        if 'ta' in packet.wlan.field_names and bssid_cli == packet.wlan.ta:
-            cli.logic_w(packet)
+    #     if 'ta' in packet.wlan.field_names and bssid_cli == packet.wlan.ta:
+    #         cli.logic_w(packet)
 
 def process_data(p):
     if p.wlan.fc_type_subtype == '40': # QoS Data
@@ -171,10 +177,10 @@ def process_data(p):
             bss = p.wlan.bssid
             client_bssid = p.wlan.staa
         else:
-            if p.wlan.ta in stations:
+            if p.wlan.ta in AP.stations:
                 bss = p.wlan.ta
                 client_bssid = p.wlan.ra
-            elif p.wlan.ta in ap_clients:
+            elif p.wlan.ta in AP.client_stations:
                 bss = p.wlan.ra
                 client_bssid = p.wlan.ta
             else:
@@ -196,8 +202,8 @@ def process_data(p):
 
 
 #########
-stations = dict()
-ap_clients = dict()
+# stations = dict()
+# ap_clients = dict()
 ###3
 
 def check_available_s(packet):
@@ -312,13 +318,28 @@ def check_mimo(packet):
 
 
 class AP:
+    stations = dict()
+    client_stations = dict()
+
+    def __eq__(self, other):
+        """Overrides the default implementation"""
+        if isinstance(other, AP):
+            return self.bssid == other.bssid
+        elif isinstance(other, str):
+            return self.bssid == other
+
+        return False
+
     def __init__(self, packet, client=False):
         self._packet = packet
 
         if not client:
             self.bssid = packet['wlan'].bssid
+            AP.stations[self.bssid] = self
         else:
             self.bssid = client
+            AP.client_stations[self.bssid] = self
+
 
         self.ap_connected = None
 
@@ -342,33 +363,33 @@ class AP:
 
     def update_probe_request(self, packet):
         # 802.11v
-        self.logic_v(packet)
+        self._logic_v(packet)
 
     def update_authentication(self, packet):
         # 802.11r
-        self.logic_r(packet)
+        self._logic_r(packet)
 
     def update_reassociation_request(self, packet):
         # 802.11r
-        self.logic_r(packet)
+        self._logic_r(packet)
 
     def update_reassociation_response(self, packet):
         # 802.11r
-        self.logic_r(packet)
+        self._logic_r(packet)
 
     def update_action(self, packet):
-        self.logic_k(packet)
-        self.logic_v(packet)
-        self.logic_r(packet)
-        self.logic_s(packet)
+        self._logic_k(packet)
+        self._logic_v(packet)
+        self._logic_r(packet)
+        self._logic_s(packet)
 
-    def logic_s(self, packet):
+    def _logic_s(self, packet):
         s = check_available_s(packet)
 
         if s != None:
             self.ext_s = s
 
-    def logic_v(self, packet):
+    def _logic_v(self, packet):
         v, vv = check_available_v(packet)
 
         if v != None:
@@ -378,7 +399,7 @@ class AP:
             self.ext_v_verified = True
             self.ext_v = True
 
-    def logic_w(self, packet):
+    def _logic_w(self, packet):
         w, wv = check_available_w(packet)
 
         if w != None:
@@ -388,7 +409,7 @@ class AP:
             self.ext_w_verified = True
             self.ext_w = True
 
-    def logic_r(self, packet):
+    def _logic_r(self, packet):
         r, rv = check_available_r(packet)
 
         if r != None:
@@ -399,7 +420,7 @@ class AP:
             self.ext_r = True
 
 
-    def logic_k(self, packet):
+    def _logic_k(self, packet):
         k, kv = check_available_k(packet)
 
         if k != None:
@@ -412,14 +433,14 @@ class AP:
 
     def update_probe_response(self, packet):
         # 802.11w
-        self.logic_w(packet)
+        self._logic_w(packet)
 
         # 802.11v
-        self.logic_v(packet)
+        self._logic_v(packet)
 
-        self.logic_r(packet)
+        self._logic_r(packet)
 
-        self.logic_s(packet)
+        self._logic_s(packet)
 
         self.set_essid(packet) # Must be after logic_s
         
@@ -436,9 +457,9 @@ class AP:
 
     def update_association_request(self, packet):
         self.ext_mimo = check_mimo(packet)
-        self.logic_w(packet)
-        self.logic_k(packet)
-        self.logic_v(packet)
+        self._logic_w(packet)
+        self._logic_k(packet)
+        self._logic_v(packet)
 
 
     def update_relationship(self, AP):
@@ -453,19 +474,19 @@ class AP:
         self.ext_mimo = check_mimo(packet)
 
         # 802.11w
-        self.logic_w(packet)
+        self._logic_w(packet)
 
         # 802.11k
-        self.logic_k(packet)
+        self._logic_k(packet)
 
         # 802.11v
-        self.logic_v(packet)
+        self._logic_v(packet)
 
         # 802.11r
-        self.logic_r(packet)
+        self._logic_r(packet)
 
         # 802.11s
-        self.logic_s(packet)
+        self._logic_s(packet)
 
         self.set_essid(packet) # Must be after logic_s
         

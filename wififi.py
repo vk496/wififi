@@ -4,22 +4,26 @@ import sys
 import os
 import pyshark
 import argparse
-import argparse
+import curses
 from packet_struct import *
 from display import *
 
 parser = argparse.ArgumentParser()
-group = parser.add_mutually_exclusive_group(required=True)
-group.add_argument('-f', '--file', action='store', metavar='')
-group.add_argument('-i', '--interface', action='store', metavar='', choices=os.listdir('/sys/class/net/'))
+
+gx = parser.add_argument_group('input options', 'various (mutually exclusive) ways to consume data')
+group = gx.add_mutually_exclusive_group(required=True)
+group.add_argument('-f', '--file', action='store', metavar='', help="Pcap file")
+group.add_argument('-i', '--interface', action='store', help="Wireless interface in monitor mode", metavar='', choices=os.listdir('/sys/class/net/'))
+
+parser.add_argument('-m', '--max', type=int, default=None, metavar='#', help="Max number of packets to read from interface (Default: unlimited)") #TODO: Disallow negative values
 args = parser.parse_args()
 
 
 if args.interface:
-    with open(f'/sys/class/net/{args.interface}/flags','r') as f:
-        value = int(f.read(), 16)
-        if value & 0x100 == 0:
-            raise ValueError(f"{args.interface} is NOT in monitor/promiscuous mode")
+    with open(f'/sys/class/net/{args.interface}/type','r') as f:
+        value = int(f.read())
+        if value != 803:
+            raise ValueError(f"{args.interface} is NOT in monitor mode")
 
 
 
@@ -38,8 +42,8 @@ def display_all(count_p, curses=None):
     local_print("  AP\tBSSID\t\t\t11w\t11k\t11v\t11r\t11s\tMIMO\tESSID\n")
     local_print("-------------------------------------------------------------------------------\n")
 
-    for index, k in enumerate(stations):
-        ap = stations[k]
+    for index, k in enumerate(AP.stations):
+        ap = AP.stations[k]
         
         is_w = print_w(ap)
         is_k = print_k(ap)
@@ -51,7 +55,7 @@ def display_all(count_p, curses=None):
         
         # print(f"802.11k           : {is_k}")
 
-        if any(ap.get_bssid() == a.get_AP() for i, a in ap_clients.items()):
+        if any(ap.get_bssid() == a.get_AP() for i, a in AP.client_stations.items()):
             index_p="·-"
         else:
             index_p="  "
@@ -59,8 +63,8 @@ def display_all(count_p, curses=None):
         # print(f"{index_p}{index}\t{ap.get_bssid()}\t{is_w}\t{is_k}\t{is_v}\t{is_r}\t{is_s}\t{is_m}\t{ap.get_essid()}")
         local_print(f"{index_p}{index}\t{ap.get_bssid()}\t{is_w}\t{is_k}\t{is_v}\t{is_r}\t{is_s}\t{is_m}\t{ap.get_essid()}\n")
         subi=1
-        for f in ap_clients:
-            cl = ap_clients[f]
+        for f in AP.client_stations:
+            cl = AP.client_stations[f]
             if cl.get_AP() == ap.get_bssid():
                 is_w = print_w(cl)
                 is_k = print_k(cl)
@@ -76,16 +80,15 @@ def display_all(count_p, curses=None):
     if curses:
         curses.refresh()
 
-import curses
-
 
 if args.file:
     cap = pyshark.FileCapture(args.file)
     screen = None
 else:
-    screen = curses.initscr()
     capture = pyshark.LiveCapture(interface=args.interface)
-    cap = capture.sniff_continuously()
+    cap = capture.sniff_continuously(packet_count=args.max)
+    screen = curses.initscr()
+    screen.scrollok(True)
 
 
 
@@ -110,12 +113,10 @@ for p in cap:
                 raise e
 
     packet_count+=1
-    if args.interface and packet_count % 10 == 0:
+    if args.interface and packet_count % 13 == 0:
         display_all(packet_count, curses=screen)
 
-if args.file:
-    display_all(packet_count)
-else:
-    curses.endwin()
+
+display_all(packet_count)
             
 
